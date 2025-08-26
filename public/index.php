@@ -3,6 +3,9 @@
 use CodeIgniter\Boot;
 use Config\Paths;
 
+// Set environment to development to enable debug toolbar
+define('CI_ENVIRONMENT', 'development');
+
 /*
  *---------------------------------------------------------------
  * CHECK PHP VERSION
