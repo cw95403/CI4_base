@@ -343,23 +343,83 @@ Permissions-Policy: geolocation=(), microphone=(), camera=()
 
 ## 10. Database Standards
 
-### Schema Design
-- Always create a migration for every database schema change. Never modify the database schema manually in any environment.
-- Always include `created_at` and `updated_at` timestamp columns on every table.
-- Always include a `deleted_at` column on tables that require soft deletes. Never hard-delete records that may be needed for audit purposes.
-- Always define foreign key constraints in migrations. Never rely on application logic alone to maintain referential integrity.
-- Always use unsigned integers for ID columns and foreign keys.
+### Naming Conventions
+- Always name tables in **lowercase snake_case**, **plural** (e.g., `user_profiles`, `audit_logs`, `password_reset_tokens`).
+- Always name columns in **lowercase snake_case** (e.g., `first_name`, `is_active`, `deleted_at`).
+- Always name primary keys `id`. Never use `<table>_id` as a primary key name.
+- Always name foreign keys `<referenced_table_singular>_id` (e.g., `user_id`, `role_id`).
+- Always name junction/pivot tables by combining the two related table names in alphabetical order, singular, separated by underscore (e.g., `permission_role`, `post_tag`).
+- Always name indexes `idx_<table>_<column(s)>` (e.g., `idx_users_email`).
+- Always name unique indexes `uq_<table>_<column(s)>` (e.g., `uq_users_email`).
+- Always name foreign key constraints `fk_<table>_<referenced_table>` (e.g., `fk_posts_users`).
+- Never use reserved SQL words as table or column names. Never use abbreviations unless the full word exceeds 64 characters.
 
-### Migrations & Seeders
-- Always make migrations reversible (implement both `up()` and `down()` methods).
-- Always use seeders only for reference/lookup data and initial admin accounts in development. Never seed production with test data.
-- Always name migrations descriptively: `2026_03_19_000001_create_users_table.php`.
+### Column Standards
+- Always define every column as `NOT NULL` unless NULL is genuinely a meaningful distinct state from an empty value.
+- Always provide a sensible `DEFAULT` value for columns that are `NOT NULL` and may not be supplied on every insert.
+- Always use `TINYINT(1)` for boolean columns. Name them with an `is_` or `has_` prefix (e.g., `is_active`, `has_verified_email`). Store `1` for true, `0` for false.
+- Always use `VARCHAR` with an appropriate length for variable-length strings. Never use `TEXT` when the maximum length is known and bounded.
+- Always use `TEXT` (or `MEDIUMTEXT`/`LONGTEXT`) only for content that is genuinely unbounded (e.g., post body, audit log details).
+- Always use `DECIMAL(precision, scale)` for monetary values (e.g., `DECIMAL(19,4)`). Never use `FLOAT` or `DOUBLE` for money.
+- Always use `DATETIME` for timestamps. Use `TIMESTAMP` only when automatic UTC conversion behavior is explicitly required.
+- Always use `CHAR(36)` for UUID columns if UUIDs are used as identifiers, not `VARCHAR`.
+- Always use `ENUM` only for values that are fixed, finite, and extremely unlikely to change. Prefer a lookup/reference table otherwise.
+- Never store serialized PHP objects or JSON blobs in columns unless using MySQL's native `JSON` column type with a documented rationale.
+- Never store file contents in the database. Store file paths/references only.
+
+### Standard Columns (Required on Every Table)
+Every table must include these columns in this order at the end of the column list:
+
+```sql
+`created_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+`updated_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+`deleted_at`  DATETIME     NULL     DEFAULT NULL
+```
+
+- Always use `deleted_at` for soft deletes. Never physically delete rows from tables that have audit, relational, or historical significance.
+- Always configure the CI4 Model's `$useSoftDeletes = true` and `$useTimestamps = true` to match.
+
+### Primary Keys
+- Always use an auto-increment `UNSIGNED BIGINT` as the primary key for all tables: `id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY`.
+- Never expose numeric auto-increment IDs in public URLs or API responses. Always use a separate `uuid` or `public_id` column for external references.
+- Always add a `uuid` column of type `CHAR(36) NOT NULL` with a unique index on tables whose records will be referenced externally.
+
+### Schema Design
+- Always normalize to at least **3NF** (Third Normal Form). Document and justify any intentional denormalization.
+- Always define foreign key constraints in migrations. Never rely on application logic alone to maintain referential integrity.
+- Always set foreign key actions explicitly: use `ON DELETE RESTRICT` as the default. Use `ON DELETE CASCADE` only when child records have no meaning without the parent and this is intentional. Never use `ON DELETE SET NULL` without a documented reason.
+- Always create a migration for every database schema change. Never modify the database schema manually in any environment.
+- Always include `created_at`, `updated_at`, and `deleted_at` on every table (see Standard Columns above).
+
+### Indexes
+- Always add an index on every foreign key column.
+- Always add an index on every column used in `WHERE`, `ORDER BY`, or `JOIN` clauses in frequent queries.
+- Always add a unique index on columns that must be unique (e.g., `email`, `uuid`, `slug`).
+- Never create redundant indexes (e.g., do not index the leading column of a composite index separately if the composite index already covers it).
+- Always review the query execution plan (`EXPLAIN`) for any query that operates on tables exceeding 10,000 rows.
+
+### Character Set & Collation
+- Always use `utf8mb4` character set and `utf8mb4_unicode_ci` collation for all tables and string columns.
+- Always set this at the database level, table level, and column level for string columns to prevent collation conflicts.
+
+### Migrations
+- Always make migrations reversible: implement both `up()` and `down()` methods.
+- Always name migrations with a timestamp prefix and descriptive verb-noun name: `2026_03_19_000001_create_users_table.php`, `2026_03_19_000002_add_uuid_to_users_table.php`.
+- Always run `docker exec php php spark migrate:status` to confirm migration state before and after deploying schema changes.
+- Never modify an already-run migration. Always create a new migration to alter an existing table.
+
+### Seeders
+- Always use seeders only for reference/lookup data and initial admin accounts.
+- Never seed production databases with test or fake data.
+- Always make seeders idempotent (safe to run multiple times without duplicating data).
 
 ### Query Standards
 - Always use CI4's Query Builder or Model methods. Never write raw SQL strings.
-- Always use `$model->findAll()`, `$model->find()`, `$model->where()` etc. with bound parameters. Never concatenate variables into query strings.
+- Always use bound parameters. Never concatenate user-supplied values into query strings.
+- Never use `SELECT *`. Always specify the exact columns needed.
+- Always paginate queries that could return more than 100 rows. Never return unbounded result sets.
 - Always add database indexes on columns used in `WHERE`, `ORDER BY`, and `JOIN` clauses.
-- Never use `SELECT *`. Always specify the columns needed.
+- Always review queries with `EXPLAIN` during development for any table join or filter on a large table.
 
 ---
 
