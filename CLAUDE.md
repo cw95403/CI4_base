@@ -20,7 +20,10 @@ This file defines mandatory standards for all development on this project and an
 12. [Performance Standards](#12-performance-standards)
 13. [Logging, Auditing & Monitoring](#13-logging-auditing--monitoring)
 14. [Testing Standards](#14-testing-standards)
-15. [Git & Deployment](#15-git--deployment)
+15. [Email Standards](#15-email-standards)
+16. [SEO Standards](#16-seo-standards)
+17. [Operational Standards](#17-operational-standards)
+18. [Git & Deployment](#18-git--deployment)
 
 ---
 
@@ -40,14 +43,17 @@ This file defines mandatory standards for all development on this project and an
 
 ### Spark Command Reference
 ```bash
-docker exec php php spark migrate              # Run pending migrations
-docker exec php php spark migrate:rollback     # Rollback last migration batch
-docker exec php php spark db:seed <SeederName> # Run a specific seeder
+docker exec php php spark migrate                # Run pending migrations
+docker exec php php spark migrate:rollback       # Rollback last migration batch
+docker exec php php spark migrate:status         # Show migration state
+docker exec php php spark db:seed <SeederName>   # Run a specific seeder
 docker exec php php spark make:controller <Name>
 docker exec php php spark make:model <Name>
 docker exec php php spark make:migration <Name>
+docker exec php php spark make:filter <Name>
 docker exec php php spark cache:clear
-docker exec php php spark routes               # List all registered routes
+docker exec php php spark routes                 # List all registered routes
+docker exec php php vendor/bin/phpunit           # Run test suite
 ```
 
 ---
@@ -70,6 +76,18 @@ docker exec php php spark routes               # List all registered routes
 - Always name controllers in PascalCase (e.g., `UserProfile`), models as `<Entity>Model` (e.g., `UserModel`), and views using snake_case paths (e.g., `users/profile_edit`).
 - Always place route definitions in `app/Config/Routes.php`. Never use auto-routing.
 - Always disable auto-routing: ensure `$routes->setAutoRoute(false)` is set.
+- Always define `$allowedFields` explicitly on every Model. Never leave it empty or omit it. Mass assignment protection is not optional.
+- Always define `$useTimestamps = true` and `$useSoftDeletes = true` on every Model unless there is a documented reason not to.
+
+### CI4 Filters
+- Always apply the `ForceHTTPS` filter globally as a `before` filter in `app/Config/Filters.php`. Server-level HTTPS enforcement is the primary layer; the CI4 filter is defense-in-depth.
+- Always apply security header filters globally. Never rely on manual header setting in individual controllers.
+- Always define filter aliases in `app/Config/Filters.php` before using them in routes.
+
+### CI4 Events
+- Always use CI4 Events (`Events::on()`) for cross-cutting concerns (audit hooks, notification triggers) that must fire across multiple controllers or models.
+- Never use Events to replace Service or Model logic. Events are for side effects, not primary business logic.
+- Always define event listeners in `app/Config/Events.php`. Never register listeners inside controllers or models.
 
 ### Comments & Documentation
 - Always add a DocBlock to every class and public method.
@@ -80,6 +98,7 @@ docker exec php php spark routes               # List all registered routes
 - Always run `composer audit` before committing changes that add or update dependencies.
 - Never require packages with known high or critical vulnerabilities.
 - Always pin major versions in `composer.json`. Never use `*` as a version constraint.
+- Always commit `composer.lock`. Never gitignore it.
 
 ---
 
@@ -99,13 +118,33 @@ Permissions-Policy: geolocation=(), microphone=(), camera=()
 
 - Always review and tighten the CSP policy for each application. The values above are the minimum baseline.
 - Never send a `Server` header that reveals software version. Configure Apache to suppress it.
-- Always enforce HTTPS. Redirect all HTTP requests to HTTPS at the server level.
+- Always enforce HTTPS. Redirect all HTTP requests to HTTPS at the server level and via the CI4 `ForceHTTPS` filter.
+- Always explicitly set `Content-Type` on every response. Never allow the framework or browser to guess the MIME type.
+
+### HTTPS Enforcement
+- Always enforce HTTPS at the server (Apache/vhost) level as the primary layer.
+- Always apply CI4's `ForceHTTPS` filter globally as a second layer of defense.
+- Always include HSTS in security headers (see above). Never remove the `preload` directive once submitted to the HSTS preload list.
 
 ### CSRF Protection
 - Always keep CSRF protection enabled (`Config\Security`).
 - Always use the `session` CSRF strategy (already configured in this boilerplate).
 - Always include the CSRF meta tag in the layout `<head>` for AJAX requests.
 - Never whitelist routes from CSRF protection unless they are verified webhook endpoints with signature validation.
+
+### CORS Policy
+- Always define a CORS policy explicitly. Never rely on default permissive behavior.
+- Never set `Access-Control-Allow-Origin: *` on any endpoint that requires authentication or handles personal data.
+- Always whitelist only known, trusted origins in the CORS configuration.
+- Always restrict allowed methods to only those needed per endpoint (`GET`, `POST`, etc.).
+- Always restrict allowed headers to only those the API actually uses.
+- Always set `Access-Control-Allow-Credentials: true` only when cookie-based cross-origin requests are explicitly required, and only alongside a specific origin (never `*`).
+- Always handle preflight (`OPTIONS`) requests correctly and return `204 No Content`.
+
+### Subresource Integrity (SRI)
+- Always add `integrity` and `crossorigin="anonymous"` attributes to any `<script>` or `<link>` tag that loads a resource from an external CDN.
+- Always generate SRI hashes using a trusted tool (e.g., `openssl dgst -sha384 -binary <file> | openssl base64 -A`).
+- Never load third-party scripts without SRI when those scripts have access to the DOM or user data.
 
 ### Input Handling
 - Always validate all input server-side using CI4's Validation library, regardless of client-side validation.
@@ -115,11 +154,35 @@ Permissions-Policy: geolocation=(), microphone=(), camera=()
 - Always validate and whitelist file types, MIME types, and file sizes on upload. Never rely on the file extension alone.
 - Always store uploaded files outside the web root or with execution disabled.
 
+### Honeypot Fields
+- Always include a honeypot field on every public-facing form (registration, contact, password reset).
+- Always name the honeypot field something that appears legitimate to bots (e.g., `website`, `url`, `phone2`).
+- Always hide the honeypot field with CSS (`display:none`), never with `type="hidden"`. Never use inline styles.
+- Always reject the submission server-side if the honeypot field is populated.
+
 ### Session Security
 - Always regenerate the session ID on login, logout, and privilege escalation.
 - Always set session cookies with `HttpOnly`, `Secure`, and `SameSite=Strict` flags.
 - Always set a session timeout of no more than 30 minutes of inactivity for authenticated sessions.
 - Never store sensitive data (passwords, full credit card numbers, SSNs) in session.
+
+### PHP Hardening
+- Always set `display_errors = Off` in `php.ini` for all non-development environments.
+- Always set `expose_php = Off` in `php.ini` to suppress the `X-Powered-By: PHP` response header.
+- Always disable dangerous PHP functions in `php.ini` (`disable_functions`): `exec`, `shell_exec`, `system`, `passthru`, `popen`, `proc_open`, `pcntl_exec`.
+- Always set `open_basedir` in `php.ini` to restrict PHP file access to the application directory and `writable/`.
+- Always set `session.cookie_secure = 1`, `session.cookie_httponly = 1`, and `session.use_strict_mode = 1` in `php.ini`.
+- Always set `log_errors = On` and direct errors to a log file outside the web root. Never display errors to users in production.
+
+### robots.txt Security
+- Always maintain a `robots.txt` in the web root.
+- Never list admin, authentication, API, or any sensitive route in `robots.txt`. Listing them advertises attack surface.
+- Always disallow crawler access to: `/admin`, `/api`, `/login`, `/register`, `/auth`, `/dashboard`, and any route that requires authentication.
+
+### security.txt (RFC 9116)
+- Always maintain a `/.well-known/security.txt` file in the web root.
+- Always include at minimum: `Contact:` (email or URL for reporting vulnerabilities) and `Expires:` (a future date, rotate annually).
+- Optionally include: `Preferred-Languages:`, `Policy:` (link to vulnerability disclosure policy), `Encryption:` (PGP key URL).
 
 ### Secrets & Credentials
 - Always store API keys, database passwords, SMTP credentials, and encryption keys in `.env`. Never in config files committed to git.
@@ -191,6 +254,7 @@ Permissions-Policy: geolocation=(), microphone=(), camera=()
 - Never knowingly collect personal information from users under 13 years of age without verifiable parental consent.
 - Always include an age gate or age verification on registration if the application could attract users under 13.
 - Always delete any personal information collected from a user identified as under 13 immediately upon discovery.
+- Always document the age verification or age gate mechanism used and retain that documentation.
 
 ### Cookie Compliance
 - Always categorize cookies as: Strictly Necessary, Functional, Analytics, or Marketing.
@@ -200,16 +264,41 @@ Permissions-Policy: geolocation=(), microphone=(), camera=()
 - Always provide a way for users to withdraw consent as easily as they gave it.
 - Always log consent with a timestamp, version of the privacy notice accepted, and the user's choice.
 
-### Privacy Policy & Legal Documents
-- Always maintain an up-to-date Privacy Policy accessible from every page footer.
-- Always maintain Terms of Service accessible from every page footer.
-- Always include an effective date and version number on Privacy Policy and Terms of Service.
-- Always update the Privacy Policy when data practices change before the change takes effect.
+### Third-Party Scripts & Tracking
+- Never load analytics (e.g., Google Analytics), advertising pixels, heatmaps, chat widgets, or any third-party tracking script until the user has granted consent for that cookie category.
+- Always load third-party scripts conditionally based on the stored consent state.
+- Always review every third-party script for data collection behavior before adding it to the application.
+- Always include any third-party data processors in the Privacy Policy.
+
+### Legal Documents
+- Always maintain an up-to-date **Privacy Policy** accessible from every page footer.
+- Always maintain a **Terms of Service** accessible from every page footer.
+- Always maintain a separate **Cookie Policy** that details every cookie set, its purpose, duration, and provider. Link it from the cookie consent banner and the Privacy Policy.
+- Always include an effective date and version number on all legal documents.
+- Always update legal documents when data practices change, before the change takes effect.
+
+### Terms of Service Acceptance Tracking
+- Always record acceptance of the Terms of Service and Privacy Policy in the database when a user registers or when the documents are updated and re-acceptance is required.
+- Always store: user ID, document type, document version, acceptance timestamp (UTC), and IP address.
+- Never allow users to use the application without a recorded acceptance of the current Terms of Service.
+- Always present users with updated documents and require re-acceptance when the Terms of Service or Privacy Policy version changes.
 
 ### Data Retention
 - Always define and document a retention period for each category of personal data collected.
 - Always implement automated deletion or anonymization of data that has exceeded its retention period.
 - Never retain personal data for longer than necessary to fulfill the purpose for which it was collected.
+
+### DMCA / Content Takedown
+- Always designate a DMCA agent if the application allows users to post or upload any content.
+- Always register the designated agent with the US Copyright Office.
+- Always implement a takedown process: receive notice → verify → remove → notify uploader → counter-notice option.
+- Always maintain a record of all takedown notices received and actions taken.
+
+### Accessibility Statement
+- Always publish an **Accessibility Statement** as a standalone page linked from the site footer.
+- Always include: the WCAG conformance level targeted (AA), known limitations, date of last accessibility review, and a contact method for users to report accessibility issues.
+- Always update the Accessibility Statement after significant UI changes or after accessibility audits.
+- This statement is legally required for EU public-sector sites (EN 301 549) and is best practice everywhere.
 
 ---
 
@@ -248,6 +337,22 @@ Permissions-Policy: geolocation=(), microphone=(), camera=()
 - Always provide a visible focus indicator on all interactive elements. Never use `outline: none` without providing a custom visible alternative.
 - Always implement a "Skip to main content" link as the first focusable element on every page.
 - Always manage focus correctly in modals: trap focus inside while open, return focus to the trigger element on close.
+
+### Session Timeout Warning
+- Always warn authenticated users at least 2 minutes before their session will expire due to inactivity.
+- Always provide a mechanism to extend the session without losing work (WCAG 2.2.1).
+- Always implement the timeout warning as an accessible modal or notification with keyboard-operable controls.
+
+### Motion & Animation
+- Always wrap all CSS animations, transitions, and auto-playing motion in a `@media (prefers-reduced-motion: reduce)` query.
+- Always provide a static or reduced alternative when `prefers-reduced-motion` is active.
+- Never autoplay video or animation that lasts more than 5 seconds without providing a pause/stop control.
+
+### Accessible Error Pages
+- Always create custom 404, 403, and 500 error pages that match the site's branding and layout.
+- Always ensure error pages meet WCAG 2.2 AA standards (accessible navigation, skip links, proper heading structure).
+- Always include a link back to the home page and, where appropriate, a search field or navigation menu on error pages.
+- Always return the correct HTTP status code from error pages. A 404 page must return `404`, not `200`.
 
 ### ARIA
 - Always use ARIA roles, states, and properties only when a native HTML element cannot provide the necessary semantics.
@@ -293,6 +398,21 @@ Permissions-Policy: geolocation=(), microphone=(), camera=()
 ### Navigation
 - Always indicate the current page in navigation using `aria-current="page"` and a visual active state.
 - Always provide breadcrumbs on pages more than one level deep.
+
+### Favicon & Web Manifest
+- Always include in every application's web root:
+  - `favicon.ico` (32×32, for legacy browsers)
+  - `favicon.svg` (scalable, preferred by modern browsers)
+  - `apple-touch-icon.png` (180×180, for iOS home screen)
+  - `site.webmanifest` (for PWA/Android home screen support)
+- Always reference all icon variants in the layout `<head>`.
+- Always set `name`, `short_name`, `icons`, `theme_color`, and `background_color` in `site.webmanifest`.
+
+### Print Styles
+- Always include a `@media print` stylesheet for any page that users may reasonably want to print (invoices, receipts, reports, order confirmations).
+- Always hide navigation, sidebars, cookie banners, buttons, and other non-content elements in print styles.
+- Always ensure text is black on white and font sizes are legible (minimum 12pt) in print output.
+- Always expand link URLs inline for print: `a[href]::after { content: " (" attr(href) ")"; }`.
 
 ---
 
@@ -389,7 +509,6 @@ Every table must include these columns in this order at the end of the column li
 - Always define foreign key constraints in migrations. Never rely on application logic alone to maintain referential integrity.
 - Always set foreign key actions explicitly: use `ON DELETE RESTRICT` as the default. Use `ON DELETE CASCADE` only when child records have no meaning without the parent and this is intentional. Never use `ON DELETE SET NULL` without a documented reason.
 - Always create a migration for every database schema change. Never modify the database schema manually in any environment.
-- Always include `created_at`, `updated_at`, and `deleted_at` on every table (see Standard Columns above).
 
 ### Indexes
 - Always add an index on every foreign key column.
@@ -443,6 +562,12 @@ Every table must include these columns in this order at the end of the column li
   ```
 - Always validate all API input with CI4's Validation library. Return `422` with field-level error details on validation failure.
 - Never return stack traces, file paths, or internal error details in API responses. Log them server-side only.
+
+### CORS
+- Always configure CORS explicitly for all API routes via a dedicated `CorsFilter`.
+- Always define allowed origins, methods, and headers per route group or globally in the filter. Never use wildcard `*` on authenticated endpoints.
+- Always return the correct `Access-Control-*` headers on both preflight and actual requests.
+- Always respond to `OPTIONS` preflight requests with `204 No Content` and the appropriate CORS headers.
 
 ### Authentication
 - Always authenticate API requests using Shield's access tokens (`Authorization: Bearer <token>`).
@@ -530,7 +655,159 @@ Every table must include these columns in this order at the end of the column li
 
 ---
 
-## 15. Git & Deployment
+## 15. Email Standards
+
+### Deliverability (DNS)
+- Always configure **SPF**, **DKIM**, and **DMARC** DNS records before sending any email from a domain.
+- Always set SPF to authorize only the mail servers that legitimately send on behalf of the domain.
+- Always sign outgoing mail with DKIM using at least a 2048-bit key.
+- Always set DMARC to at minimum `p=none` with a `rua` reporting address during initial deployment. Advance to `p=quarantine` and then `p=reject` after monitoring reports confirm legitimate mail is passing.
+- Never send application email from a domain without DMARC configured.
+
+### Message Standards
+- Always send both **HTML** and **plain text** versions of every email. Never send HTML-only email.
+- Never include personal data (full name, account number, order details, SSN) in the email **subject line**. Subject lines appear in push notifications and email previews.
+- Always use a consistent, branded email template that matches the application's UI.
+- Always include the sender's physical mailing address in every email (required by CAN-SPAM and CASL).
+- Always include a clear identification of who sent the email (`From` name and address must be accurate and non-deceptive).
+
+### CAN-SPAM Act (United States)
+- Always include a functional **unsubscribe link** in every marketing or promotional email.
+- Always honor unsubscribe requests within **10 business days**. Never charge for unsubscribing.
+- Always use accurate `From`, `To`, `Reply-To`, and routing information. Never use deceptive headers.
+- Always use subject lines that accurately reflect the content of the email.
+- Always include the sender's valid physical postal address in the email body.
+
+### CASL (Canada's Anti-Spam Legislation)
+- Always obtain **express consent** before sending commercial electronic messages (CEMs) to Canadian recipients. Implied consent is time-limited (2 years) and must be documented.
+- Always record proof of consent: who consented, when, how (the form or mechanism used), and what they consented to.
+- Always honor unsubscribe requests within **10 business days**.
+- Always include in every CEM: sender identification, sender contact information, and an unsubscribe mechanism.
+- Never send a CEM to a Canadian recipient without a documented consent record.
+
+### Transactional vs. Marketing Email
+- Always distinguish between transactional email (account verification, password reset, receipts) and marketing email (newsletters, promotions).
+- Always allow users to unsubscribe from marketing email without affecting transactional email delivery.
+- Always store email subscription preferences per user in the database.
+
+---
+
+## 16. SEO Standards
+
+### Page-Level Meta Tags
+- Always include a unique, descriptive `<title>` tag on every page. Format: `Page Name — Site Name`. Maximum 60 characters.
+- Always include a unique `<meta name="description">` on every page. Maximum 160 characters. Write it as a human-readable summary, not a keyword list.
+- Always include `<link rel="canonical" href="...">` on every page to prevent duplicate content indexing.
+- Never use the same `<title>` or `<meta name="description">` on more than one page.
+
+### Open Graph & Social Sharing
+- Always include Open Graph meta tags on every public-facing page:
+  ```html
+  <meta property="og:title" content="...">
+  <meta property="og:description" content="...">
+  <meta property="og:image" content="...">
+  <meta property="og:url" content="...">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="...">
+  ```
+- Always include Twitter Card tags on every public-facing page:
+  ```html
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="...">
+  <meta name="twitter:description" content="...">
+  <meta name="twitter:image" content="...">
+  ```
+- Always use an OG image of at least 1200×630px. Always use an absolute URL for `og:image`.
+
+### robots.txt
+- Always maintain a `robots.txt` at the web root.
+- Always disallow crawlers from: `/admin`, `/api`, `/auth`, `/login`, `/register`, `/dashboard`, and any route that requires authentication or returns user-specific data.
+- Always include a `Sitemap:` directive pointing to the sitemap URL.
+- Never block CSS or JavaScript files that search engines need to render pages correctly.
+
+### Sitemap
+- Always maintain a `sitemap.xml` listing all public, indexable pages.
+- Always exclude admin, auth, API, and user-specific pages from the sitemap.
+- Always include `<lastmod>` dates on sitemap entries for content pages.
+- Always submit the sitemap to Google Search Console and Bing Webmaster Tools after launch.
+- Always regenerate the sitemap when new public pages are added.
+
+### Structured Data
+- Always add `schema.org` structured data (JSON-LD format) to pages where it is applicable:
+  - `Organization` on the home page
+  - `BreadcrumbList` on any page with breadcrumb navigation
+  - `FAQPage` on FAQ sections
+  - `Article` or `BlogPosting` on content/blog pages
+- Always validate structured data using Google's Rich Results Test before deploying.
+- Always use JSON-LD format. Never use Microdata or RDFa.
+
+### Technical SEO
+- Always ensure pages load over HTTPS. Mixed content causes search engine demotion.
+- Always specify the `lang` attribute on the `<html>` element matching the page's primary language.
+- Always use descriptive, hyphen-separated URL slugs. Never use query strings for primary content pages (e.g., `/blog/my-post-title` not `/blog?id=42`).
+- Never block crawlers from indexing public content pages.
+- Always redirect old URLs to new URLs with a `301` redirect when URLs change. Never let pages return `404` where content has moved.
+
+---
+
+## 17. Operational Standards
+
+### Application Versioning
+- Always version the application using **Semantic Versioning (SemVer)**: `MAJOR.MINOR.PATCH`.
+  - `MAJOR`: breaking change or significant redesign
+  - `MINOR`: new feature, backwards-compatible
+  - `PATCH`: bug fix, security patch, minor improvement
+- Always store the current version in a single authoritative location (e.g., `app/Config/App.php` as `$appVersion` or a `VERSION` file in the project root).
+- Always tag git releases with the version number: `git tag v1.2.3`.
+- Always update the version before merging a release branch into `main`.
+
+### Changelog
+- Always maintain a `CHANGELOG.md` in the project root.
+- Always use the [Keep a Changelog](https://keepachangelog.com) format: sections for `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
+- Always update `CHANGELOG.md` as part of every release. Never batch-write changelog entries after the fact.
+- Always include the release date and version number for each entry.
+
+### Browser Support
+The following browsers and minimum versions are supported. Never use CSS features, JavaScript APIs, or HTML elements not supported by this matrix without a tested polyfill or progressive enhancement fallback:
+
+| Browser | Minimum Version |
+|---|---|
+| Chrome | Last 2 major versions |
+| Firefox | Last 2 major versions |
+| Safari | Last 2 major versions |
+| Edge | Last 2 major versions |
+| iOS Safari | Last 2 major versions |
+| Android Chrome | Last 2 major versions |
+| Samsung Internet | Last 2 major versions |
+
+- Always test on mobile (real device or verified emulator) before marking any responsive feature complete.
+- Never use browser-prefixed CSS properties without also including the unprefixed standard property.
+- Always use progressive enhancement: core content and functionality must work without JavaScript.
+
+### Backup & Recovery
+- Always back up the database on a scheduled basis: daily minimum, hourly for high-traffic or high-criticality applications.
+- Always store backups in a location physically separate from the application server (offsite or a different cloud region).
+- Always encrypt database backups at rest.
+- Always retain backups for a minimum of 30 days.
+- Always test backup restoration at least once per quarter. A backup that has never been tested is not a backup.
+- Always document the restoration procedure so recovery can be performed under pressure.
+- Always back up the `.env` file and any uploaded user content separately from the database.
+
+### Incident Response
+- Always maintain a written incident response plan, even if brief, that covers:
+  1. **Detection** — How to identify a breach or compromise (monitoring alerts, user reports)
+  2. **Containment** — Immediate steps to limit damage (disable accounts, rotate credentials, take service offline if necessary)
+  3. **Assessment** — Determine scope: what data was accessed, how many users affected, how long the breach occurred
+  4. **Notification** — GDPR: notify supervisory authority within 72 hours; notify affected users without undue delay if high risk
+  5. **Remediation** — Fix the vulnerability, restore from backup if needed, re-harden
+  6. **Post-mortem** — Document what happened, what was done, and what changes prevent recurrence
+- Always rotate all credentials (database passwords, API keys, encryption keys, SMTP passwords) immediately upon confirmed or suspected compromise.
+- Always preserve logs and evidence before making changes after a security incident. Never overwrite logs during an active investigation.
+- Always notify affected users in plain, non-technical language. Include: what happened, what data was affected, what you have done, and what they should do.
+
+---
+
+## 18. Git & Deployment
 
 ### Branching
 - Always create a feature branch for every change: `feature/<short-description>`.
@@ -546,18 +823,30 @@ Every table must include these columns in this order at the end of the column li
 
 ### Pre-Deployment Checklist
 - [ ] `CI_ENVIRONMENT` is set to `production` in `.env`
+- [ ] `display_errors = Off` and `expose_php = Off` in `php.ini`
 - [ ] Debug toolbar is disabled
-- [ ] `.env` is not committed and not web-accessible
+- [ ] `.env` is not committed and is not web-accessible
 - [ ] `composer audit` shows no high or critical vulnerabilities
-- [ ] All migrations have been run
+- [ ] All migrations have been run (`spark migrate:status` shows no pending)
 - [ ] All tests pass
+- [ ] Application version updated in `App.php` or `VERSION`
+- [ ] `CHANGELOG.md` updated for this release
 - [ ] HTTPS is enforced and HTTP redirects to HTTPS
-- [ ] Security headers are returning correctly (verify with securityheaders.com)
-- [ ] Cookie consent is functioning correctly
-- [ ] Error pages return the correct HTTP status codes (not 200)
+- [ ] Security headers verified (use securityheaders.com)
+- [ ] CORS policy is configured correctly and not using wildcard on authenticated endpoints
+- [ ] `security.txt` is present and `Expires` date is in the future
+- [ ] `robots.txt` is present and does not expose sensitive routes
+- [ ] `sitemap.xml` is up to date
+- [ ] Cookie consent banner is functioning correctly
+- [ ] Third-party scripts not loading before consent
+- [ ] SPF, DKIM, and DMARC DNS records are configured for the sending domain
+- [ ] Error pages return the correct HTTP status codes (404 returns 404, not 200)
+- [ ] Accessible error pages (404, 403, 500) are in place
 - [ ] Log directory is writable and outside the web root
 - [ ] `writable/` directory is not web-accessible
+- [ ] Backup system is active and last backup has been verified restorable
 - [ ] No hardcoded credentials in any committed file
+- [ ] Favicon, apple-touch-icon, and `site.webmanifest` are present
 
 ---
 
