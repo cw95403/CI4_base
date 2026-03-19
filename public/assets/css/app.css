@@ -1,0 +1,5 @@
+:root{
+    --brand-primary:#0d6efd;
+    --brand-accent:#6c757d;
+  }
+  .btn-brand{ background:var(--brand-primary); color:#fff; }
